@@ -2,7 +2,7 @@
 // Teleprompter Pro v2.1 — Voice Activity Engine (Event Frequency)
 // ============================================================
 
-const APP_VERSION = "v2.1";
+const APP_VERSION = "v2.2";
 
 // --- DOM ---
 const editorContainer = document.getElementById('editor-container');
@@ -61,14 +61,17 @@ const DRAG_THRESHOLD = 8;
 let recognition = null;
 let isMicActive = false;
 let speechMultiplier = 0;       // 0 = paused, ~1 = normal, >1 = fast
+let targetMultiplier = 0;       // Target for smooth transitions
 let resultTimestamps = [];      // Timestamps of onresult events
 let silenceTimer = null;
-const SILENCE_MS = 1000;    // Pause after 1s silence
-const RATE_WINDOW = 2000;    // Measure rate over 2s window
+let wasSilent = true;           // Track if we were just silent (for burst)
+const SILENCE_MS = 700;         // Pause after 700ms silence (was 1000)
+const RATE_WINDOW = 1000;       // Measure over 1s window (was 2000)
 
-// Typical speech produces ~4-8 onresult events/sec with interimResults
-const EVENTS_FOR_NORMAL = 3;    // events/sec → multiplier 1.0
-const MAX_MULTIPLIER = 2.0;
+// Calibration: how many onresult events/sec = "normal" speaking pace
+const EVENTS_FOR_NORMAL = 4;    // events/sec → multiplier 1.0
+const MAX_MULTIPLIER = 2.5;
+const MULTIPLIER_LERP = 0.3;    // How fast multiplier tracks target
 
 // ============================================================
 // INIT
@@ -249,7 +252,9 @@ function loop(ts) {
     let speed = 0;
 
     if (isMicActive) {
-        // Voice-driven: speechMultiplier is set by event frequency
+        // Voice-driven: smooth the multiplier toward target
+        speechMultiplier += (targetMultiplier - speechMultiplier) * MULTIPLIER_LERP;
+        if (speechMultiplier < 0.05) speechMultiplier = 0; // Snap to zero
         speed = speechMultiplier * baseSpeed;
     } else if (isPlaying && !isDragging) {
         speed = baseSpeed * 1.5;
@@ -293,7 +298,9 @@ function startMic() {
     recognition.onstart = () => {
         isMicActive = true;
         speechMultiplier = 0;
+        targetMultiplier = 0;
         resultTimestamps = [];
+        wasSilent = true;
         micToggle.classList.add('active');
         micStatusBar.classList.remove('hidden');
         micStatusText.innerText = 'Ready — speak to scroll';
@@ -323,9 +330,6 @@ function startMic() {
     };
 
     recognition.onresult = () => {
-        // We don't care about the transcript at all!
-        // We only care that this event fired = user is speaking.
-
         const now = performance.now();
         resultTimestamps.push(now);
 
@@ -333,27 +337,30 @@ function startMic() {
         const cutoff = now - RATE_WINDOW;
         resultTimestamps = resultTimestamps.filter(t => t > cutoff);
 
-        // Calculate events per second
-        const eventsInWindow = resultTimestamps.length;
-        const windowSec = RATE_WINDOW / 1000;
-        const eventsPerSec = eventsInWindow / windowSec;
+        // If resuming from silence, immediately jump to normal speed
+        if (wasSilent) {
+            targetMultiplier = 1.0;
+            speechMultiplier = 0.8; // Instant kick
+            wasSilent = false;
+        } else {
+            // Calculate events per second in the window
+            const elapsed = (now - resultTimestamps[0]) / 1000;
+            const eps = resultTimestamps.length / Math.max(elapsed, 0.3);
 
-        // Map to multiplier:
-        // EVENTS_FOR_NORMAL eps → 1.0x
-        // More → proportionally faster, capped at MAX_MULTIPLIER
-        speechMultiplier = Math.min(eventsPerSec / EVENTS_FOR_NORMAL, MAX_MULTIPLIER);
-
-        // Ensure minimum movement when speaking
-        if (speechMultiplier < 0.3) speechMultiplier = 0.3;
+            // Map to multiplier
+            targetMultiplier = Math.min(eps / EVENTS_FOR_NORMAL, MAX_MULTIPLIER);
+            if (targetMultiplier < 0.4) targetMultiplier = 0.4;
+        }
 
         // Update UI
-        const pct = Math.round(speechMultiplier * 100);
+        const pct = Math.round(targetMultiplier * 100);
         micStatusText.innerText = `Speaking — ${pct}% speed`;
 
         // Reset silence timer
         clearTimeout(silenceTimer);
         silenceTimer = setTimeout(() => {
-            speechMultiplier = 0;
+            targetMultiplier = 0;
+            wasSilent = true;
             micStatusText.innerText = 'Paused — waiting for speech';
         }, SILENCE_MS);
     };

@@ -135,7 +135,6 @@ textarea:focus {
 #scroll-content {
     position: absolute;
     top: 40vh;
-    /* Text starts at reading line */
     left: 50%;
     transform: translateX(-50%);
     width: 90%;
@@ -146,6 +145,11 @@ textarea:focus {
     white-space: pre-wrap;
     padding-bottom: 100vh;
     will-change: transform;
+    /* CRITICAL: Prevent mobile keyboard/text-selection */
+    pointer-events: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
 }
 
 /* ── Tap Zone ── */
