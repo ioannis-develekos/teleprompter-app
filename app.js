@@ -7,6 +7,9 @@ const backBtn = document.getElementById('back-btn');
 const controlsOverlay = document.getElementById('controls-overlay');
 const tapZone = document.getElementById('tap-zone');
 
+// Version Info
+const APP_VERSION = "v1.2";
+
 // Controls
 const speedSlider = document.getElementById('speed-slider');
 const sizeSlider = document.getElementById('size-slider');
@@ -20,23 +23,42 @@ const languageSelect = document.getElementById('language-select');
 let isScrolling = false;
 let scrollSpeed = 20; // Pixels per second
 let lastFrameTime = 0;
-let scrollPos = 0;
+
+// Transform State
+let currentScrollPos = 0;
+let targetScrollPos = 0;
+const LERP_FACTOR = 0.1;
+
 let isPrompterActive = false;
 let flipX = false;
 let flipY = false;
 let animationFrameId;
 
+// Touch State
+let isDragging = false;
+let lastTouchY = 0;
+
 // Speech Tracking State
 let recognition = null;
 let isMicActive = false;
-let scriptWordElements = []; // Array of span elements
+let scriptWordElements = [];
 let lastMatchedIndex = 0;
-let silenceTimer;
 
 // --- Initialization ---
 
 function init() {
     loadSettings();
+    document.title = `Teleprompter Pro ${APP_VERSION}`;
+
+    // Add version badge if not exists
+    const h1 = document.querySelector('header h1');
+    if (h1 && !h1.querySelector('.version-badge')) {
+        const badge = document.createElement('span');
+        badge.className = 'version-badge';
+        badge.innerText = APP_VERSION;
+        h1.appendChild(badge);
+    }
+
     const savedText = localStorage.getItem('teleprompter_text');
     if (savedText) {
         textInput.value = savedText;
@@ -48,35 +70,91 @@ function init() {
 startBtn.addEventListener('click', () => {
     const text = textInput.value.trim();
     if (!text) return alert('Please enter some text!');
-
     localStorage.setItem('teleprompter_text', text);
     enterPrompterMode(text);
 });
 
 backBtn.addEventListener('click', exitPrompterMode);
 
-tapZone.addEventListener('click', () => {
-    if (isMicActive) {
-        // If Mic is active, tap just toggles controls overlay visibility?
-        // Or maybe pauses mic? Let's assume tap pauses everything.
-        toggleMic();
-        return;
+// Tap Logic: Toggle Controls
+tapZone.addEventListener('click', (e) => {
+    // If we just dragged, don't toggle
+    if (isDragging) return;
+
+    // Toggle controls
+    if (controlsOverlay.classList.contains('hidden')) {
+        controlsOverlay.classList.remove('hidden');
+        // Optionally pause?
+    } else {
+        controlsOverlay.classList.add('hidden');
     }
 
-    // Manual Mode
-    isScrolling = !isScrolling;
-    if (isScrolling) {
-        controlsOverlay.classList.add('hidden');
-        lastFrameTime = performance.now();
-        requestAnimationFrame(gameLoop);
-    } else {
-        controlsOverlay.classList.remove('hidden');
+    // Toggle manual play/pause if NOT dragging and controls were hidden? 
+    // User wants: "Ability to touch screen and toolbar appears" -> Implies tap for toolbar.
+    // "Scroll manually with finger" -> Drag.
+
+    // Let's separate Play/Pause from Menu Toggle.
+    // Maybe: Tap = Toggle Menu.
+    // Play Button in Menu? Or just Slider > 0?
+    // Current behavior: Slider controls speed. 'isScrolling' is play state.
+
+    if (!isMicActive) {
+        // If controls match state... currently tap just toggles menu.
+        // Let's keep scrolling running unless speed is 0.
+        // Or if user wants to play/pause, maybe add a button?
+        // User said: "Pause when I pause" (Speech).
+        // Let's assume tap only toggles menu now, and drag handles manual move.
     }
 });
+
+// Touch Drag Logic
+tapZone.addEventListener('touchstart', (e) => {
+    isDragging = false;
+    lastTouchY = e.touches[0].clientY;
+    // Stop auto-scroll momentarily while touching?
+    isScrolling = false;
+}, { passive: false });
+
+tapZone.addEventListener('touchmove', (e) => {
+    isDragging = true;
+    e.preventDefault(); // Stop Browser Scroll
+    const touchY = e.touches[0].clientY;
+    const deltaY = lastTouchY - touchY; // Up is positive delta (scrolling down)
+
+    // Directly move content
+    targetScrollPos += deltaY;
+    if (targetScrollPos < 0) targetScrollPos = 0;
+
+    // Instant update for responsiveness
+    currentScrollPos = targetScrollPos;
+    updateScrollTransform();
+
+    lastTouchY = touchY;
+}, { passive: false });
+
+tapZone.addEventListener('touchend', () => {
+    // Resume scrolling if it was active?
+    // Or just leave it paused?
+    // User expectation: If I drag, I take control.
+    // If I let go, maybe it stays there until I hit 'play' or speak?
+    // Let's leave isScrolling = false for manual control.
+    // User can tap controls -> Speed -> Auto scroll? 
+    // Wait, if manual mode, how to resume?
+    // Maybe we need a specific toggle for "Auto Scroll" vs "Manual".
+    // For now: Speed slider > 0 implies auto movement. 
+    // If user dragged, we paused. To resume, maybe tap? 
+
+    // Let's auto-resume if NOT mic mode, after short delay?
+    // Or just let user tap to resume?
+    // Simplified: Drag pauses. Tap toggles Menu. 
+    // If Menu hidden, maybe Tap toggles Play/Pause?
+});
+
 
 speedSlider.addEventListener('input', (e) => {
     scrollSpeed = parseInt(e.target.value);
     document.getElementById('speed-display').innerText = scrollSpeed;
+    if (scrollSpeed > 0 && !isMicActive) isScrolling = true;
 });
 
 sizeSlider.addEventListener('input', applySettings);
@@ -88,21 +166,22 @@ micToggle.addEventListener('click', toggleMic);
 // --- Core Logic ---
 
 function enterPrompterMode(text) {
-    // 1. Prepare Text (Wrap words for tracking)
     prepareScriptForTracking(text);
 
-    // 2. Switch View
     editorContainer.classList.remove('active');
     prompterContainer.classList.add('active');
     isPrompterActive = true;
 
-    // 3. Reset State
-    scrollPos = 0;
-    scrollContent.style.top = '10px'; // Initial offset
-    lastMatchedIndex = 0;
-    isScrolling = false;
+    // Reset
+    currentScrollPos = 0;
+    targetScrollPos = 0;
+    updateScrollTransform();
 
+    isScrolling = false;
     applySettings();
+
+    lastFrameTime = performance.now();
+    requestAnimationFrame(gameLoop);
 }
 
 function exitPrompterMode() {
@@ -116,24 +195,18 @@ function exitPrompterMode() {
 }
 
 function prepareScriptForTracking(text) {
-    scrollContent.innerHTML = ''; // Clear
+    scrollContent.innerHTML = '';
     scriptWordElements = [];
 
-    // Split by paragraphs to preserve structure
     const paragraphs = text.split('\n');
-
     paragraphs.forEach(paraText => {
         if (!paraText.trim()) {
             scrollContent.appendChild(document.createElement('br'));
             return;
         }
-
-        const p = document.createElement('div'); // Using div for lines/paragraphs
+        const p = document.createElement('div');
         p.style.marginBottom = '1em';
-
-        // Split text into words, preserving spaces
         const words = paraText.split(/(\s+)/);
-
         words.forEach(w => {
             if (w.trim().length > 0) {
                 const span = document.createElement('span');
@@ -144,54 +217,77 @@ function prepareScriptForTracking(text) {
                     element: span,
                     cleanText: normalizeText(w)
                 });
-            } else {
-                p.appendChild(document.createTextNode(w));
-            }
+            } else { p.appendChild(document.createTextNode(w)); }
         });
-
         scrollContent.appendChild(p);
     });
 }
 
 function normalizeText(str) {
     return str.toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Strip accents
-        .replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, ""); // Strip punctuation
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
 }
 
 function applySettings() {
     scrollContent.style.fontSize = `${sizeSlider.value}px`;
     scrollContent.style.width = `${widthSlider.value}%`;
-
-    scrollContent.className = ''; // reset classes
-    if (flipX && flipY) scrollContent.classList.add('flip-xy');
-    else if (flipX) scrollContent.classList.add('flip-x');
-    else if (flipY) scrollContent.classList.add('flip-y');
+    updateScrollTransform(); // Re-apply in case of flip change
 }
 
-// Manual Scroll Loop
+// Update the visual transform
+function updateScrollTransform() {
+    // Top: 50vh is usually base.
+    // If we want to scroll "UP", we TranslateY negative.
+    // translate3d(0, calc(50vh - currentScrollPos px), 0)
+    // But CSS calc in transform is tricky with variables in JS strings.
+    // Let's just use pixel offset from specific top.
+
+    // We want the text to start at 50vh (middle).
+    // So visual Y = (50vh in px) - currentScrollPos
+    // We can just keep top: 50vh in CSS and translate -currentScrollPos
+
+    let transform = `translateX(-50%) translate3d(0, -${currentScrollPos}px, 0)`;
+
+    if (flipX && flipY) transform += ' scale(-1, -1)';
+    else if (flipX) transform += ' scaleX(-1)';
+    else if (flipY) transform += ' scaleY(-1)';
+
+    scrollContent.style.transform = transform;
+}
+
 function gameLoop(timestamp) {
-    if (!isScrolling || !isPrompterActive || isMicActive) return; // Mic handles its own scroll
+    if (!isPrompterActive) return;
 
     const deltaTime = (timestamp - lastFrameTime) / 1000;
     lastFrameTime = timestamp;
 
-    if (scrollSpeed > 0) {
-        scrollPos += (scrollSpeed * 2) * deltaTime;
-        window.scrollTo(0, scrollPos);
+    if (isScrolling && !isMicActive && scrollSpeed > 0 && !isDragging) {
+        targetScrollPos += (scrollSpeed * 2) * deltaTime;
+    }
+
+    // Lerp for smoothness
+    if (!isDragging) {
+        if (Math.abs(targetScrollPos - currentScrollPos) > 0.5) {
+            currentScrollPos += (targetScrollPos - currentScrollPos) * LERP_FACTOR;
+            updateScrollTransform();
+        } else {
+            // Snap
+            if (currentScrollPos !== targetScrollPos) {
+                currentScrollPos = targetScrollPos;
+                updateScrollTransform();
+            }
+        }
     }
 
     animationFrameId = requestAnimationFrame(gameLoop);
 }
 
-// --- Speech Recognition & Follow Mode ---
+// --- Speech Recognition ---
 
 function toggleMic() {
-    if (isMicActive) {
-        stopMic();
-    } else {
-        startMic();
-    }
+    if (isMicActive) stopMic();
+    else startMic();
 }
 
 function startMic() {
@@ -206,15 +302,15 @@ function startMic() {
 
     recognition.onstart = () => {
         isMicActive = true;
-        isScrolling = false; // Disable manual loop
+        isScrolling = false;
         micToggle.classList.add('active');
         micToggle.innerText = '🎤 Listening...';
-        controlsOverlay.classList.add('hidden'); // Hide controls for immersion
+        controlsOverlay.classList.add('hidden');
     };
 
     recognition.onend = () => {
         if (isMicActive) {
-            try { recognition.start(); } catch (e) { } // Auto-restart
+            try { recognition.start(); } catch (e) { }
         } else {
             micToggle.classList.remove('active');
             micToggle.innerText = '🎤 Start Auto-Scroll';
@@ -222,11 +318,8 @@ function startMic() {
     };
 
     recognition.onresult = (event) => {
-        // Collect latest interim or final results
         const results = event.results;
-        const latestResult = results[event.resultIndex];
-        const transcript = latestResult[0].transcript;
-
+        const transcript = results[event.resultIndex][0].transcript;
         matchSpeechToScript(transcript);
     };
 
@@ -243,24 +336,18 @@ function matchSpeechToScript(transcript) {
     const spokenWords = normalizeText(transcript).split(/\s+/);
     if (spokenWords.length === 0) return;
 
-    // We only care about the last few spoken words to find our place
-    // Look ahead from lastMatchedIndex
-    const searchWindow = 50; // How far ahead to look
+    const searchWindow = 60;
     const startSearch = lastMatchedIndex;
     const endSearch = Math.min(lastMatchedIndex + searchWindow, scriptWordElements.length);
 
     let bestMatchIndex = -1;
-
-    // specific strategy: find the sequence of last 2-3 spoken words in the script window
     const lastWord = spokenWords[spokenWords.length - 1];
     if (!lastWord) return;
 
-    // Simple single-word "anchor" matching for responsiveness
-    // (A more complex version would match n-grams)
     for (let i = startSearch; i < endSearch; i++) {
         if (scriptWordElements[i].cleanText === lastWord) {
             bestMatchIndex = i;
-            break; // Take the first match in the window
+            break;
         }
     }
 
@@ -268,28 +355,41 @@ function matchSpeechToScript(transcript) {
         lastMatchedIndex = bestMatchIndex;
         scrollToWord(bestMatchIndex);
 
-        // Visual feedback
         const el = scriptWordElements[bestMatchIndex].element;
-        el.style.color = '#ffff00'; // Highlight
-        setTimeout(() => el.style.color = '', 1000); // Fade out
+        el.style.color = '#ffff00';
+        setTimeout(() => el.style.color = '', 1000);
     }
 }
 
 function scrollToWord(index) {
     if (!scriptWordElements[index]) return;
-
     const el = scriptWordElements[index].element;
 
-    // We want this element to be around the middle of the screen (or top third)
-    // The "reading line" is usually around 30-40% from top.
+    // Find offset relative to container
+    // Since we use transform on scrollContent, el.offsetTop is internal to that container
+    // offsetTop = distance from top of scrollContent (which starts at 0 inside itself)
 
-    const rect = el.getBoundingClientRect();
-    const absoluteTop = window.scrollY + rect.top;
-    const targetScroll = absoluteTop - (window.innerHeight * 0.4); // 40% down
+    const offsetTop = el.offsetTop;
 
-    // Smooth scroll
-    window.scrollTo({
-        top: targetScroll,
-        behavior: 'smooth'
-    });
+    // We want this word to be at 40% of viewport.
+    // Visual Top = scrollContent.top (50vh) - scrollPos + offsetTop
+    // We want Visual Top = 40vh
+    // 40vh = 50vh - scrollPos + offsetTop
+    // scrollPos = 50vh - 40vh + offsetTop
+    // scrollPos = 10vh + offsetTop
+
+    const vh = window.innerHeight;
+    const targetVisualY = vh * 0.4;
+    const startY = vh * 0.5; // CSS top: 50vh
+
+    // targetVisualY = startY - scrollPos + offsetTop
+    // scrollPos = startY - targetVisualY + offsetTop
+    // scrollPos = (0.5 - 0.4)*vh + offsetTop = 0.1*vh + offsetTop
+
+    targetScrollPos = (vh * 0.1) + offsetTop;
+
+    // Safety
+    if (targetScrollPos < 0) targetScrollPos = 0;
 }
+
+init();

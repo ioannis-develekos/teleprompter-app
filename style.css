@@ -72,6 +72,8 @@ textarea {
     width: 100%;
     background: black;
     overflow: hidden;
+    touch-action: none;
+    /* Prevent default browser scroll/zoom */
 }
 
 #prompter-container.active {
@@ -79,9 +81,10 @@ textarea {
 }
 
 #scroll-content {
+    /* Position fixed/absolute is okay, but we use transforms */
     position: absolute;
     top: 50vh;
-    /* Start halfway down */
+    /* Start visual center */
     left: 50%;
     transform: translateX(-50%);
     width: 90%;
@@ -91,7 +94,7 @@ textarea {
     text-align: left;
     white-space: pre-wrap;
     padding-bottom: 80vh;
-    /* Allow scrolling past end */
+    will-change: transform;
 }
 
 /* Flip Utilities */
@@ -107,7 +110,9 @@ textarea {
     transform: translateX(-50%) scale(-1, -1) !important;
 }
 
-/* Tap Zone to Play/Pause */
+/* Tap Zone to Play/Pause - Make it cover but allow clicks to pass to overlay? 
+   Actually, let's make tap zone handle formatting, but if overlay is visible it sits on top.
+*/
 #tap-zone {
     position: absolute;
     top: 0;
@@ -115,7 +120,14 @@ textarea {
     width: 100%;
     height: 100%;
     z-index: 10;
-    /* Below controls, above text */
+}
+
+/* Version Badge */
+.version-badge {
+    font-size: 0.8rem;
+    color: #666;
+    margin-left: 0.5rem;
+    vertical-align: middle;
 }
 
 /* Controls Overlay */
@@ -131,12 +143,14 @@ textarea {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    transition: opacity 0.3s;
+    transition: opacity 0.3s, transform 0.3s;
+    transform: translateY(0);
 }
 
 #controls-overlay.hidden {
     opacity: 0;
     pointer-events: none;
+    transform: translateY(100%);
 }
 
 .control-row {
