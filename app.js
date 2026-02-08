@@ -1,16 +1,19 @@
+// ============================================================
+// Teleprompter Pro v2.0 — Voice Activity + Speech Rate Engine
+// ============================================================
+
+const APP_VERSION = "v2.0";
+
+// --- DOM ---
 const editorContainer = document.getElementById('editor-container');
 const prompterContainer = document.getElementById('prompter-container');
 const textInput = document.getElementById('text-input');
 const scrollContent = document.getElementById('scroll-content');
 const startBtn = document.getElementById('start-btn');
 const backBtn = document.getElementById('back-btn');
+const playPauseBtn = document.getElementById('play-pause-btn');
 const controlsOverlay = document.getElementById('controls-overlay');
 const tapZone = document.getElementById('tap-zone');
-
-// Version Info
-const APP_VERSION = "v1.3";
-
-// Controls
 const speedSlider = document.getElementById('speed-slider');
 const sizeSlider = document.getElementById('size-slider');
 const widthSlider = document.getElementById('width-slider');
@@ -18,272 +21,249 @@ const flipXBtn = document.getElementById('flip-x-btn');
 const flipYBtn = document.getElementById('flip-y-btn');
 const micToggle = document.getElementById('mic-toggle');
 const languageSelect = document.getElementById('language-select');
+const micStatusBar = document.getElementById('mic-status-bar');
+const micStatusText = document.getElementById('mic-status-text');
 
-// State
-let isScrolling = false;
-let scrollSpeed = 20; // Pixels per second
-let lastFrameTime = 0;
-
-// Transform State
+// --- State ---
+let isPlaying = false;   // Manual scroll active
+let baseSpeed = 25;      // Base px/sec from slider
 let currentScrollPos = 0;
 let targetScrollPos = 0;
-const LERP_FACTOR = 0.1;
+const LERP = 0.12;
 
 let isPrompterActive = false;
-let flipX = false;
-let flipY = false;
-let animationFrameId;
+let flipX = false, flipY = false;
+let animFrameId;
 
-// Touch State
+// Touch
 let isDragging = false;
+let touchStartY = 0;
 let lastTouchY = 0;
+const DRAG_THRESHOLD = 8; // px before we consider it a drag
 
-// Speech Tracking State
+// Speech / Voice Activity
 let recognition = null;
 let isMicActive = false;
-let scriptWordElements = [];
-let lastMatchedIndex = 0;
+let speechSpeed = 0;      // Dynamic multiplier from speech rate
+let lastSpeechTime = 0;
+let silenceTimeout = null;
+const SILENCE_DELAY = 1200;   // ms of silence before pausing
+let wordTimestamps = [];     // For calculating speech rate
 
-// --- Initialization ---
-
+// ============================================================
+// INIT
+// ============================================================
 function init() {
-    loadSettings();
-    document.title = `Teleprompter Pro ${APP_VERSION}`;
+    const saved = localStorage.getItem('teleprompter_text');
+    if (saved) textInput.value = saved;
 
-    // Add version badge if not exists
-    const h1 = document.querySelector('header h1');
-    if (h1 && !h1.querySelector('.version-badge')) {
-        const badge = document.createElement('span');
-        badge.className = 'version-badge';
-        badge.innerText = APP_VERSION;
-        h1.appendChild(badge);
-    }
-
-    const savedText = localStorage.getItem('teleprompter_text');
-    if (savedText) {
-        textInput.value = savedText;
-    }
+    // Restore slider values
+    const ss = localStorage.getItem('tp_speed');
+    const sz = localStorage.getItem('tp_size');
+    const wd = localStorage.getItem('tp_width');
+    if (ss) { speedSlider.value = ss; baseSpeed = +ss; }
+    if (sz) { sizeSlider.value = sz; }
+    if (wd) { widthSlider.value = wd; }
+    updateDisplays();
 }
 
-// --- Event Listeners ---
+function updateDisplays() {
+    document.getElementById('speed-display').innerText = speedSlider.value;
+    document.getElementById('size-display').innerText = sizeSlider.value;
+    document.getElementById('width-display').innerText = widthSlider.value + '%';
+}
+
+// ============================================================
+// EVENT LISTENERS
+// ============================================================
 
 startBtn.addEventListener('click', () => {
     const text = textInput.value.trim();
     if (!text) return alert('Please enter some text!');
     localStorage.setItem('teleprompter_text', text);
-    enterPrompterMode(text);
+    enterPrompter(text);
 });
 
-backBtn.addEventListener('click', exitPrompterMode);
+backBtn.addEventListener('click', exitPrompter);
 
-// Tap Logic: Toggle Controls
-tapZone.addEventListener('click', (e) => {
-    // If we just dragged, don't toggle
-    if (isDragging) return;
-
-    // Toggle controls
-    if (controlsOverlay.classList.contains('hidden')) {
-        controlsOverlay.classList.remove('hidden');
-        // Optionally pause?
-    } else {
-        controlsOverlay.classList.add('hidden');
-    }
-
-    // Toggle manual play/pause if NOT dragging and controls were hidden? 
-    // User wants: "Ability to touch screen and toolbar appears" -> Implies tap for toolbar.
-    // "Scroll manually with finger" -> Drag.
-
-    // Let's separate Play/Pause from Menu Toggle.
-    // Maybe: Tap = Toggle Menu.
-    // Play Button in Menu? Or just Slider > 0?
-    // Current behavior: Slider controls speed. 'isScrolling' is play state.
-
-    if (!isMicActive) {
-        // If controls match state... currently tap just toggles menu.
-        // Let's keep scrolling running unless speed is 0.
-        // Or if user wants to play/pause, maybe add a button?
-        // User said: "Pause when I pause" (Speech).
-        // Let's assume tap only toggles menu now, and drag handles manual move.
-    }
+playPauseBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    togglePlay();
 });
 
-// Touch Drag Logic
+// Sliders
+speedSlider.addEventListener('input', () => {
+    baseSpeed = +speedSlider.value;
+    localStorage.setItem('tp_speed', speedSlider.value);
+    updateDisplays();
+});
+sizeSlider.addEventListener('input', () => {
+    localStorage.setItem('tp_size', sizeSlider.value);
+    updateDisplays();
+    applyVisuals();
+});
+widthSlider.addEventListener('input', () => {
+    localStorage.setItem('tp_width', widthSlider.value);
+    updateDisplays();
+    applyVisuals();
+});
+
+flipXBtn.addEventListener('click', (e) => { e.stopPropagation(); flipX = !flipX; applyTransform(); });
+flipYBtn.addEventListener('click', (e) => { e.stopPropagation(); flipY = !flipY; applyTransform(); });
+micToggle.addEventListener('click', (e) => { e.stopPropagation(); toggleMic(); });
+
+// --- Touch Handling ---
+// Goal: short tap = toggle controls, drag = manual scroll
+
 tapZone.addEventListener('touchstart', (e) => {
     isDragging = false;
-    lastTouchY = e.touches[0].clientY;
-    // Stop auto-scroll momentarily while touching?
-    isScrolling = false;
-}, { passive: false });
+    touchStartY = e.touches[0].clientY;
+    lastTouchY = touchStartY;
+}, { passive: true });
 
 tapZone.addEventListener('touchmove', (e) => {
-    isDragging = true;
-    e.preventDefault(); // Stop Browser Scroll
-    const touchY = e.touches[0].clientY;
-    const deltaY = lastTouchY - touchY; // Up is positive delta (scrolling down)
+    const y = e.touches[0].clientY;
+    const totalDelta = Math.abs(y - touchStartY);
 
-    // Directly move content
-    targetScrollPos += deltaY;
-    if (targetScrollPos < 0) targetScrollPos = 0;
+    if (totalDelta > DRAG_THRESHOLD) {
+        isDragging = true;
+        e.preventDefault();
 
-    // Instant update for responsiveness
-    currentScrollPos = targetScrollPos;
-    updateScrollTransform();
-
-    lastTouchY = touchY;
+        const delta = lastTouchY - y; // positive = scroll down
+        targetScrollPos += delta;
+        if (targetScrollPos < 0) targetScrollPos = 0;
+        currentScrollPos = targetScrollPos;
+        applyTransform();
+    }
+    lastTouchY = y;
 }, { passive: false });
 
 tapZone.addEventListener('touchend', () => {
-    // Resume scrolling if it was active?
-    // Or just leave it paused?
-    // User expectation: If I drag, I take control.
-    // If I let go, maybe it stays there until I hit 'play' or speak?
-    // Let's leave isScrolling = false for manual control.
-    // User can tap controls -> Speed -> Auto scroll? 
-    // Wait, if manual mode, how to resume?
-    // Maybe we need a specific toggle for "Auto Scroll" vs "Manual".
-    // For now: Speed slider > 0 implies auto movement. 
-    // If user dragged, we paused. To resume, maybe tap? 
-
-    // Let's auto-resume if NOT mic mode, after short delay?
-    // Or just let user tap to resume?
-    // Simplified: Drag pauses. Tap toggles Menu. 
-    // If Menu hidden, maybe Tap toggles Play/Pause?
+    if (!isDragging) {
+        // It was a tap → toggle controls
+        toggleControls();
+    }
+    isDragging = false;
 });
 
-
-speedSlider.addEventListener('input', (e) => {
-    scrollSpeed = parseInt(e.target.value);
-    document.getElementById('speed-display').innerText = scrollSpeed;
-    if (scrollSpeed > 0 && !isMicActive) isScrolling = true;
+// Mouse click fallback (desktop)
+tapZone.addEventListener('click', (e) => {
+    // On desktop, click = toggle controls
+    // On mobile, touchend already handles it; click fires after but isDragging is reset
+    // So this is mainly for desktop
+    if (!('ontouchstart' in window)) {
+        toggleControls();
+    }
 });
 
-sizeSlider.addEventListener('input', applySettings);
-widthSlider.addEventListener('input', applySettings);
-flipXBtn.addEventListener('click', () => { flipX = !flipX; applySettings(); });
-flipYBtn.addEventListener('click', () => { flipY = !flipY; applySettings(); });
-micToggle.addEventListener('click', toggleMic);
+// ============================================================
+// PROMPTER CORE
+// ============================================================
 
-// --- Core Logic ---
-
-function enterPrompterMode(text) {
-    prepareScriptForTracking(text);
+function enterPrompter(text) {
+    scrollContent.innerText = text;
 
     editorContainer.classList.remove('active');
     prompterContainer.classList.add('active');
     isPrompterActive = true;
 
-    // Reset
     currentScrollPos = 0;
     targetScrollPos = 0;
-    updateScrollTransform();
+    isPlaying = false;
+    updatePlayBtn();
+    applyVisuals();
+    applyTransform();
 
-    isScrolling = false;
-    applySettings();
-
+    // Start render loop
     lastFrameTime = performance.now();
-    requestAnimationFrame(gameLoop);
+    requestAnimationFrame(loop);
 }
 
-function exitPrompterMode() {
+function exitPrompter() {
     isPrompterActive = false;
-    isScrolling = false;
+    isPlaying = false;
     stopMic();
-    cancelAnimationFrame(animationFrameId);
-
+    cancelAnimationFrame(animFrameId);
     prompterContainer.classList.remove('active');
     editorContainer.classList.add('active');
 }
 
-function prepareScriptForTracking(text) {
-    scrollContent.innerHTML = '';
-    scriptWordElements = [];
-
-    const paragraphs = text.split('\n');
-    paragraphs.forEach(paraText => {
-        if (!paraText.trim()) {
-            scrollContent.appendChild(document.createElement('br'));
-            return;
-        }
-        const p = document.createElement('div');
-        p.style.marginBottom = '1em';
-        const words = paraText.split(/(\s+)/);
-        words.forEach(w => {
-            if (w.trim().length > 0) {
-                const span = document.createElement('span');
-                span.innerText = w;
-                span.className = 'script-word';
-                p.appendChild(span);
-                scriptWordElements.push({
-                    element: span,
-                    cleanText: normalizeText(w)
-                });
-            } else { p.appendChild(document.createTextNode(w)); }
-        });
-        scrollContent.appendChild(p);
-    });
+function togglePlay() {
+    isPlaying = !isPlaying;
+    updatePlayBtn();
+    if (isPlaying) {
+        controlsOverlay.classList.add('hidden');
+    }
 }
 
-function normalizeText(str) {
-    return str.toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
+function updatePlayBtn() {
+    if (isPlaying) {
+        playPauseBtn.innerText = '⏸';
+        playPauseBtn.classList.add('playing');
+    } else {
+        playPauseBtn.innerText = '▶';
+        playPauseBtn.classList.remove('playing');
+    }
 }
 
-function applySettings() {
-    scrollContent.style.fontSize = `${sizeSlider.value}px`;
-    scrollContent.style.width = `${widthSlider.value}%`;
-    updateScrollTransform(); // Re-apply in case of flip change
+function toggleControls() {
+    controlsOverlay.classList.toggle('hidden');
 }
 
-// Update the visual transform
-function updateScrollTransform() {
-    // Top: 50vh is usually base.
-    // If we want to scroll "UP", we TranslateY negative.
-    // translate3d(0, calc(50vh - currentScrollPos px), 0)
-    // But CSS calc in transform is tricky with variables in JS strings.
-    // Let's just use pixel offset from specific top.
-
-    // We want the text to start at 50vh (middle).
-    // So visual Y = (50vh in px) - currentScrollPos
-    // We can just keep top: 50vh in CSS and translate -currentScrollPos
-
-    let transform = `translateX(-50%) translate3d(0, -${currentScrollPos}px, 0)`;
-
-    if (flipX && flipY) transform += ' scale(-1, -1)';
-    else if (flipX) transform += ' scaleX(-1)';
-    else if (flipY) transform += ' scaleY(-1)';
-
-    scrollContent.style.transform = transform;
+function applyVisuals() {
+    scrollContent.style.fontSize = sizeSlider.value + 'px';
+    scrollContent.style.width = widthSlider.value + '%';
 }
 
-function gameLoop(timestamp) {
+function applyTransform() {
+    let t = `translateX(-50%) translate3d(0, ${-currentScrollPos}px, 0)`;
+    if (flipX && flipY) t += ' scale(-1,-1)';
+    else if (flipX) t += ' scaleX(-1)';
+    else if (flipY) t += ' scaleY(-1)';
+    scrollContent.style.transform = t;
+}
+
+// ============================================================
+// RENDER LOOP
+// ============================================================
+let lastFrameTime = 0;
+
+function loop(ts) {
     if (!isPrompterActive) return;
 
-    const deltaTime = (timestamp - lastFrameTime) / 1000;
-    lastFrameTime = timestamp;
+    const dt = (ts - lastFrameTime) / 1000;
+    lastFrameTime = ts;
 
-    if (isScrolling && !isMicActive && scrollSpeed > 0 && !isDragging) {
-        targetScrollPos += (scrollSpeed * 2) * deltaTime;
+    // --- Determine effective speed ---
+    let effectiveSpeed = 0;
+
+    if (isMicActive) {
+        // Voice-controlled: speechSpeed is set by speech rate detection
+        effectiveSpeed = speechSpeed * baseSpeed;
+    } else if (isPlaying && !isDragging) {
+        // Manual play mode
+        effectiveSpeed = baseSpeed * 1.5;
     }
 
-    // Lerp for smoothness
+    if (effectiveSpeed > 0) {
+        targetScrollPos += effectiveSpeed * dt;
+    }
+
+    // Lerp
     if (!isDragging) {
-        if (Math.abs(targetScrollPos - currentScrollPos) > 0.5) {
-            currentScrollPos += (targetScrollPos - currentScrollPos) * LERP_FACTOR;
-            updateScrollTransform();
-        } else {
-            // Snap
-            if (currentScrollPos !== targetScrollPos) {
-                currentScrollPos = targetScrollPos;
-                updateScrollTransform();
-            }
+        const diff = targetScrollPos - currentScrollPos;
+        if (Math.abs(diff) > 0.3) {
+            currentScrollPos += diff * LERP;
+            applyTransform();
         }
     }
 
-    animationFrameId = requestAnimationFrame(gameLoop);
+    animFrameId = requestAnimationFrame(loop);
 }
 
-// --- Speech Recognition ---
+// ============================================================
+// SPEECH ENGINE — Voice Activity + Speech Rate
+// ============================================================
 
 function toggleMic() {
     if (isMicActive) stopMic();
@@ -291,10 +271,10 @@ function toggleMic() {
 }
 
 function startMic() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) return alert('Browser not supported.');
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return alert('Speech API not supported. Use Chrome.');
 
-    recognition = new SpeechRecognition();
+    recognition = new SR();
     recognition.lang = languageSelect.value;
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -302,25 +282,78 @@ function startMic() {
 
     recognition.onstart = () => {
         isMicActive = true;
-        isScrolling = false;
+        speechSpeed = 0;
+        wordTimestamps = [];
         micToggle.classList.add('active');
-        micToggle.innerText = '🎤 Listening...';
-        controlsOverlay.classList.add('hidden');
+        micStatusBar.classList.remove('hidden');
+        micStatusText.innerText = 'Listening — speak to scroll';
+
+        // Pause manual play if active
+        isPlaying = false;
+        updatePlayBtn();
     };
 
     recognition.onend = () => {
         if (isMicActive) {
+            // Auto-restart (Android/Chrome kills it periodically)
             try { recognition.start(); } catch (e) { }
         } else {
             micToggle.classList.remove('active');
-            micToggle.innerText = '🎤 Start Auto-Scroll';
+            micStatusBar.classList.add('hidden');
+        }
+    };
+
+    recognition.onerror = (e) => {
+        console.warn('Speech error:', e.error);
+        if (e.error === 'not-allowed') {
+            alert('Microphone access denied. Please allow it in browser settings.');
+            stopMic();
         }
     };
 
     recognition.onresult = (event) => {
-        const results = event.results;
-        const transcript = results[event.resultIndex][0].transcript;
-        matchSpeechToScript(transcript);
+        const now = performance.now();
+
+        // Count new words from the latest result
+        const result = event.results[event.resultIndex];
+        const transcript = result[0].transcript.trim();
+        const words = transcript.split(/\s+/);
+
+        // Record timestamps for rate calculation
+        wordTimestamps.push({ time: now, count: words.length });
+
+        // Keep only last 3 seconds of data
+        const windowStart = now - 3000;
+        wordTimestamps = wordTimestamps.filter(w => w.time > windowStart);
+
+        // Calculate words per second over the window
+        if (wordTimestamps.length >= 2) {
+            const oldest = wordTimestamps[0];
+            const elapsed = (now - oldest.time) / 1000;
+            const totalWords = wordTimestamps.reduce((s, w) => s + w.count, 0);
+            const wps = totalWords / Math.max(elapsed, 0.5);
+
+            // Map WPS to speed multiplier
+            // Typical speech: 2-3 words/sec → multiplier ~1.0
+            // Fast speech: 4+ words/sec → multiplier ~1.5-2.0
+            // Slow speech: 1 word/sec → multiplier ~0.5
+            speechSpeed = Math.min(wps / 2.5, 2.5); // Normalize: 2.5 wps = 1.0x
+        } else {
+            speechSpeed = 0.8; // Default while starting
+        }
+
+        // Update status
+        micStatusText.innerText = `Speaking — ${speechSpeed.toFixed(1)}× speed`;
+
+        // Mark last speech time
+        lastSpeechTime = now;
+
+        // Reset silence timer
+        clearTimeout(silenceTimeout);
+        silenceTimeout = setTimeout(() => {
+            speechSpeed = 0;
+            micStatusText.innerText = 'Paused — waiting for speech';
+        }, SILENCE_DELAY);
     };
 
     recognition.start();
@@ -328,68 +361,19 @@ function startMic() {
 
 function stopMic() {
     isMicActive = false;
-    if (recognition) recognition.stop();
-    controlsOverlay.classList.remove('hidden');
-}
-
-function matchSpeechToScript(transcript) {
-    const spokenWords = normalizeText(transcript).split(/\s+/);
-    if (spokenWords.length === 0) return;
-
-    const searchWindow = 60;
-    const startSearch = lastMatchedIndex;
-    const endSearch = Math.min(lastMatchedIndex + searchWindow, scriptWordElements.length);
-
-    let bestMatchIndex = -1;
-    const lastWord = spokenWords[spokenWords.length - 1];
-    if (!lastWord) return;
-
-    for (let i = startSearch; i < endSearch; i++) {
-        if (scriptWordElements[i].cleanText === lastWord) {
-            bestMatchIndex = i;
-            break;
-        }
+    speechSpeed = 0;
+    clearTimeout(silenceTimeout);
+    if (recognition) {
+        try { recognition.stop(); } catch (e) { }
     }
-
-    if (bestMatchIndex !== -1) {
-        lastMatchedIndex = bestMatchIndex;
-        scrollToWord(bestMatchIndex);
-
-        const el = scriptWordElements[bestMatchIndex].element;
-        el.style.color = '#ffff00';
-        setTimeout(() => el.style.color = '', 1000);
-    }
+    micToggle.classList.remove('active');
+    micStatusBar.classList.add('hidden');
 }
 
-function scrollToWord(index) {
-    if (!scriptWordElements[index]) return;
-    const el = scriptWordElements[index].element;
+// ============================================================
+// SETTINGS PERSISTENCE
+// ============================================================
+function loadSettings() { } // Handled in init()
 
-    // Find offset relative to container
-    // Since we use transform on scrollContent, el.offsetTop is internal to that container
-    // offsetTop = distance from top of scrollContent (which starts at 0 inside itself)
-
-    const offsetTop = el.offsetTop;
-
-    // We want this word to be at 40% of viewport.
-    // Visual Top = scrollContent.top (50vh) - scrollPos + offsetTop
-    // We want Visual Top = 40vh
-    // 40vh = 50vh - scrollPos + offsetTop
-    // scrollPos = 50vh - 40vh + offsetTop
-    // scrollPos = 10vh + offsetTop
-
-    const vh = window.innerHeight;
-    const targetVisualY = vh * 0.4;
-    const startY = vh * 0.5; // CSS top: 50vh
-
-    // targetVisualY = startY - scrollPos + offsetTop
-    // scrollPos = startY - targetVisualY + offsetTop
-    // scrollPos = (0.5 - 0.4)*vh + offsetTop = 0.1*vh + offsetTop
-
-    targetScrollPos = (vh * 0.1) + offsetTop;
-
-    // Safety
-    if (targetScrollPos < 0) targetScrollPos = 0;
-}
-
+// ============================================================
 init();

@@ -1,8 +1,10 @@
 :root {
-    --bg-color: #000000;
-    --text-color: #ffffff;
-    --accent-color: #007bff;
-    --control-bg: rgba(20, 20, 20, 0.95);
+    --bg: #000;
+    --text: #fff;
+    --accent: #3b82f6;
+    --accent-glow: rgba(59, 130, 246, 0.3);
+    --panel-bg: rgba(10, 10, 10, 0.96);
+    --danger: #ef4444;
 }
 
 * {
@@ -12,20 +14,22 @@
 }
 
 body {
-    font-family: 'Roboto', sans-serif;
-    background-color: var(--bg-color);
-    color: var(--text-color);
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
     overflow: hidden;
-    /* Prevent body scroll, handle inside containers */
     height: 100vh;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
-/* Editor Styles */
+/* ── Editor ── */
 #editor-container {
     display: none;
     flex-direction: column;
     height: 100vh;
     padding: 1rem;
+    background: linear-gradient(180deg, #0a0a0a 0%, #111 100%);
 }
 
 #editor-container.active {
@@ -37,82 +41,114 @@ header {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 1rem;
+    flex-shrink: 0;
+}
+
+.header-controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
 }
 
 h1 {
-    font-size: 1.5rem;
+    font-size: 1.3rem;
+    font-weight: 700;
+}
+
+.version-badge {
+    font-size: 0.7rem;
+    color: #555;
+    font-weight: 400;
+    vertical-align: middle;
+}
+
+select {
+    background: #1a1a1a;
+    color: #ccc;
+    border: 1px solid #333;
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
 }
 
 textarea {
     flex: 1;
-    background: #1a1a1a;
-    color: white;
-    border: 1px solid #333;
+    background: #0d0d0d;
+    color: #e0e0e0;
+    border: 1px solid #222;
     padding: 1rem;
-    font-size: 1.2rem;
+    font-size: 1.1rem;
+    line-height: 1.6;
     resize: none;
-    border-radius: 8px;
+    border-radius: 10px;
+    font-family: 'Inter', sans-serif;
+}
+
+textarea:focus {
+    outline: none;
+    border-color: var(--accent);
 }
 
 .primary-btn {
-    background: var(--accent-color);
+    background: var(--accent);
     color: white;
     border: none;
-    padding: 0.5rem 1.5rem;
-    font-size: 1rem;
-    border-radius: 4px;
+    padding: 0.5rem 1.2rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    border-radius: 8px;
     cursor: pointer;
+    transition: background 0.2s;
 }
 
-/* Prompter Styles */
+.primary-btn:active {
+    background: #2563eb;
+}
+
+/* ── Prompter ── */
 #prompter-container {
     display: none;
     position: relative;
     height: 100vh;
     width: 100%;
-    background: black;
+    background: #000;
     overflow: hidden;
     touch-action: none;
-    /* Prevent default browser scroll/zoom */
 }
 
 #prompter-container.active {
     display: block;
 }
 
-#scroll-content {
-    /* Position fixed/absolute is okay, but we use transforms */
+/* Reading line at 40% height */
+#reading-line {
     position: absolute;
-    top: 50vh;
-    /* Start visual center */
+    top: 40%;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: rgba(59, 130, 246, 0.25);
+    z-index: 5;
+    pointer-events: none;
+}
+
+#scroll-content {
+    position: absolute;
+    top: 40vh;
+    /* Text starts at reading line */
     left: 50%;
     transform: translateX(-50%);
     width: 90%;
-    color: white;
-    font-size: 60px;
-    line-height: 1.4;
+    color: #fff;
+    font-size: 48px;
+    line-height: 1.5;
     text-align: left;
     white-space: pre-wrap;
-    padding-bottom: 80vh;
+    padding-bottom: 100vh;
     will-change: transform;
 }
 
-/* Flip Utilities */
-.flip-x {
-    transform: translateX(-50%) scaleX(-1) !important;
-}
-
-.flip-y {
-    transform: translateX(-50%) scaleY(-1) !important;
-}
-
-.flip-xy {
-    transform: translateX(-50%) scale(-1, -1) !important;
-}
-
-/* Tap Zone to Play/Pause - Make it cover but allow clicks to pass to overlay? 
-   Actually, let's make tap zone handle formatting, but if overlay is visible it sits on top.
-*/
+/* ── Tap Zone ── */
 #tap-zone {
     position: absolute;
     top: 0;
@@ -122,89 +158,145 @@ textarea {
     z-index: 10;
 }
 
-/* Version Badge */
-.version-badge {
-    font-size: 0.8rem;
-    color: #666;
-    margin-left: 0.5rem;
-    vertical-align: middle;
-}
-
-/* Controls Overlay */
+/* ── Controls Overlay ── */
 #controls-overlay {
     position: absolute;
     bottom: 0;
     left: 0;
     width: 100%;
-    background: var(--control-bg);
-    padding: 1rem;
-    z-index: 20;
-    border-top: 1px solid #333;
+    background: var(--panel-bg);
+    padding: 0.8rem 1rem;
+    z-index: 30;
+    border-top: 1px solid #222;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    transition: opacity 0.3s, transform 0.3s;
+    gap: 0.6rem;
+    transition: transform 0.3s ease, opacity 0.25s ease;
     transform: translateY(0);
 }
 
 #controls-overlay.hidden {
+    transform: translateY(100%);
     opacity: 0;
     pointer-events: none;
-    transform: translateY(100%);
+}
+
+.top-row {
+    justify-content: space-around;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid #222;
 }
 
 .control-row {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.6rem;
 }
 
 .control-row label {
-    width: 50px;
-    font-size: 0.9rem;
+    width: 42px;
+    font-size: 0.8rem;
+    color: #888;
+    flex-shrink: 0;
+}
+
+.control-row span {
+    width: 32px;
+    text-align: right;
+    font-size: 0.8rem;
+    color: #666;
 }
 
 input[type="range"] {
     flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    background: #333;
+    border-radius: 2px;
+    outline: none;
 }
 
-button {
-    background: #333;
-    color: white;
-    border: 1px solid #555;
-    padding: 0.3rem 0.8rem;
-    border-radius: 4px;
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
     cursor: pointer;
 }
 
-.mic-btn {
-    width: 100%;
-    background: #2a2a2a;
-    padding: 0.8rem;
-    margin-top: 0.5rem;
-    border: 1px solid #444;
+/* Buttons */
+.icon-btn {
+    background: #1a1a1a;
+    color: #ccc;
+    border: 1px solid #333;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.icon-btn:active {
+    background: #333;
+}
+
+.play-btn.playing {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
 }
 
 .mic-btn.active {
-    background: #b90000;
-    border-color: red;
+    background: var(--danger);
+    border-color: var(--danger);
+    color: white;
+    animation: pulse 1.5s ease-in-out infinite;
 }
 
-#mic-status {
+@keyframes pulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+    }
+
+    50% {
+        box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+    }
+}
+
+/* Mic Status Bar */
+#mic-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0;
     font-size: 0.8rem;
-    color: #aaa;
+    color: #888;
+}
+
+#mic-status-bar.hidden {
     display: none;
 }
 
-/* Highlighting current word (optional for later) */
-.highlight {
-    color: yellow;
+#mic-indicator {
+    color: var(--danger);
+    animation: blink 1s step-end infinite;
 }
 
-.script-word {
-    display: inline-block;
-    /* Allows transforms/padding if needed, but inline is fine too */
-    padding: 2px 0;
-    transition: color 0.2s;
-    border-radius: 2px;
+@keyframes blink {
+    50% {
+        opacity: 0;
+    }
+}
+
+/* ── Misc ── */
+button {
+    font-family: 'Inter', sans-serif;
 }

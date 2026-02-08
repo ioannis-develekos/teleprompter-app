@@ -4,12 +4,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Teleprompter Pro v1.3</title>
+    <title>Teleprompter Pro v2.0</title>
     <link rel="stylesheet" href="style.css">
     <link rel="manifest" href="manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 </head>
 
 <body>
@@ -17,13 +17,13 @@
     <!-- Editor Mode -->
     <div id="editor-container" class="active">
         <header>
-            <h1>Teleprompter Pro <span class="version-badge">v1.3</span></h1>
+            <h1>Teleprompter Pro <span class="version-badge">v2.0</span></h1>
             <div class="header-controls">
                 <select id="language-select">
-                    <option value="en-US">English (US)</option>
-                    <option value="el-GR">Greek (Ελληνικά)</option>
+                    <option value="en-US">English</option>
+                    <option value="el-GR">Ελληνικά</option>
                 </select>
-                <button id="start-btn" class="primary-btn">START</button>
+                <button id="start-btn" class="primary-btn">▶ START</button>
             </div>
         </header>
         <textarea id="text-input" placeholder="Type or paste your script here..."></textarea>
@@ -31,51 +31,55 @@
 
     <!-- Prompter Mode -->
     <div id="prompter-container">
+        <!-- Reading Line Indicator -->
+        <div id="reading-line"></div>
+
         <!-- The scrolling content -->
         <div id="scroll-content"></div>
 
-        <!-- Hover Overlay Controls -->
+        <!-- Controls Overlay -->
         <div id="controls-overlay">
-            <div class="control-row">
-                <button id="back-btn">Exit</button>
-                <button id="flip-x-btn" title="Flip Horizontal">↔️</button>
-                <button id="flip-y-btn" title="Flip Vertical">↕️</button>
+            <div class="control-row top-row">
+                <button id="back-btn" class="icon-btn" title="Exit">✕</button>
+                <button id="play-pause-btn" class="icon-btn play-btn" title="Play/Pause">▶</button>
+                <button id="flip-x-btn" class="icon-btn" title="Flip Horizontal">↔</button>
+                <button id="flip-y-btn" class="icon-btn" title="Flip Vertical">↕</button>
+                <button id="mic-toggle" class="icon-btn mic-btn" title="Voice Follow">🎤</button>
             </div>
 
             <div class="control-row">
                 <label>Speed</label>
-                <input type="range" id="speed-slider" min="0" max="100" value="20">
-                <span id="speed-display">20</span>
+                <input type="range" id="speed-slider" min="1" max="100" value="25">
+                <span id="speed-display">25</span>
             </div>
 
             <div class="control-row">
                 <label>Size</label>
-                <input type="range" id="size-slider" min="20" max="150" value="60">
+                <input type="range" id="size-slider" min="20" max="120" value="48">
+                <span id="size-display">48</span>
             </div>
 
             <div class="control-row">
                 <label>Width</label>
                 <input type="range" id="width-slider" min="50" max="100" value="90">
+                <span id="width-display">90%</span>
             </div>
 
-            <div class="control-row mic-row">
-                <button id="mic-toggle" class="mic-btn">
-                    🎤 Auto-Scroll: OFF
-                </button>
-                <div id="mic-status">Listening...</div>
+            <div id="mic-status-bar" class="hidden">
+                <span id="mic-indicator">●</span>
+                <span id="mic-status-text">Listening — speak to scroll</span>
             </div>
         </div>
 
-        <!-- Play/Pause Tap Zone -->
+        <!-- Tap Zone -->
         <div id="tap-zone"></div>
     </div>
 
     <script src="app.js"></script>
     <script>
-        // Register Service Worker
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('service-worker.js')
-                .then(() => console.log('Service Worker Registered'));
+                .then(() => console.log('SW OK'));
         }
     </script>
 </body>
