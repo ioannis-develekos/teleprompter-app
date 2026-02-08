@@ -1,0 +1,196 @@
+:root {
+    --bg-color: #000000;
+    --text-color: #ffffff;
+    --accent-color: #007bff;
+    --control-bg: rgba(20, 20, 20, 0.95);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Roboto', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    overflow: hidden;
+    /* Prevent body scroll, handle inside containers */
+    height: 100vh;
+}
+
+/* Editor Styles */
+#editor-container {
+    display: none;
+    flex-direction: column;
+    height: 100vh;
+    padding: 1rem;
+}
+
+#editor-container.active {
+    display: flex;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+h1 {
+    font-size: 1.5rem;
+}
+
+textarea {
+    flex: 1;
+    background: #1a1a1a;
+    color: white;
+    border: 1px solid #333;
+    padding: 1rem;
+    font-size: 1.2rem;
+    resize: none;
+    border-radius: 8px;
+}
+
+.primary-btn {
+    background: var(--accent-color);
+    color: white;
+    border: none;
+    padding: 0.5rem 1.5rem;
+    font-size: 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+/* Prompter Styles */
+#prompter-container {
+    display: none;
+    position: relative;
+    height: 100vh;
+    width: 100%;
+    background: black;
+    overflow: hidden;
+}
+
+#prompter-container.active {
+    display: block;
+}
+
+#scroll-content {
+    position: absolute;
+    top: 50vh;
+    /* Start halfway down */
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    color: white;
+    font-size: 60px;
+    line-height: 1.4;
+    text-align: left;
+    white-space: pre-wrap;
+    padding-bottom: 80vh;
+    /* Allow scrolling past end */
+}
+
+/* Flip Utilities */
+.flip-x {
+    transform: translateX(-50%) scaleX(-1) !important;
+}
+
+.flip-y {
+    transform: translateX(-50%) scaleY(-1) !important;
+}
+
+.flip-xy {
+    transform: translateX(-50%) scale(-1, -1) !important;
+}
+
+/* Tap Zone to Play/Pause */
+#tap-zone {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 10;
+    /* Below controls, above text */
+}
+
+/* Controls Overlay */
+#controls-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: var(--control-bg);
+    padding: 1rem;
+    z-index: 20;
+    border-top: 1px solid #333;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    transition: opacity 0.3s;
+}
+
+#controls-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.control-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.control-row label {
+    width: 50px;
+    font-size: 0.9rem;
+}
+
+input[type="range"] {
+    flex: 1;
+}
+
+button {
+    background: #333;
+    color: white;
+    border: 1px solid #555;
+    padding: 0.3rem 0.8rem;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.mic-btn {
+    width: 100%;
+    background: #2a2a2a;
+    padding: 0.8rem;
+    margin-top: 0.5rem;
+    border: 1px solid #444;
+}
+
+.mic-btn.active {
+    background: #b90000;
+    border-color: red;
+}
+
+#mic-status {
+    font-size: 0.8rem;
+    color: #aaa;
+    display: none;
+}
+
+/* Highlighting current word (optional for later) */
+.highlight {
+    color: yellow;
+}
+
+.script-word {
+    display: inline-block;
+    /* Allows transforms/padding if needed, but inline is fine too */
+    padding: 2px 0;
+    transition: color 0.2s;
+    border-radius: 2px;
+}
