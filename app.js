@@ -65,13 +65,13 @@ let targetMultiplier = 0;       // Target for smooth transitions
 let resultTimestamps = [];      // Timestamps of onresult events
 let silenceTimer = null;
 let wasSilent = true;           // Track if we were just silent (for burst)
-const SILENCE_MS = 700;         // Pause after 700ms silence (was 1000)
-const RATE_WINDOW = 1000;       // Measure over 1s window (was 2000)
+const SILENCE_MS = 700;         // Pause after 700ms silence
+const RATE_WINDOW = 1500;       // Measure over 1.5s window (smoother)
 
-// Calibration: how many onresult events/sec = "normal" speaking pace
+// Calibration
 const EVENTS_FOR_NORMAL = 4;    // events/sec → multiplier 1.0
-const MAX_MULTIPLIER = 2.5;
-const MULTIPLIER_LERP = 0.3;    // How fast multiplier tracks target
+const MAX_MULTIPLIER = 1.6;     // Cap max speed swing (was 2.5)
+const MULTIPLIER_LERP = 0.08;   // Slow smooth transitions (was 0.3)
 
 // ============================================================
 // INIT
@@ -340,7 +340,7 @@ function startMic() {
         // If resuming from silence, immediately jump to normal speed
         if (wasSilent) {
             targetMultiplier = 1.0;
-            speechMultiplier = 0.8; // Instant kick
+            speechMultiplier = 0.5; // Gentle kick, lerp will smooth the rest
             wasSilent = false;
         } else {
             // Calculate events per second in the window
