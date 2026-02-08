@@ -1,21 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Teleprompter Pro</title>
+    <title>Teleprompter Pro v1.3</title>
     <link rel="stylesheet" href="style.css">
     <link rel="manifest" href="manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
 </head>
+
 <body>
 
     <!-- Editor Mode -->
     <div id="editor-container" class="active">
         <header>
-            <h1>Teleprompter Pro</h1>
+            <h1>Teleprompter Pro <span class="version-badge">v1.3</span></h1>
             <div class="header-controls">
                 <select id="language-select">
                     <option value="en-US">English (US)</option>
@@ -31,7 +33,7 @@
     <div id="prompter-container">
         <!-- The scrolling content -->
         <div id="scroll-content"></div>
-        
+
         <!-- Hover Overlay Controls -->
         <div id="controls-overlay">
             <div class="control-row">
@@ -39,19 +41,19 @@
                 <button id="flip-x-btn" title="Flip Horizontal">↔️</button>
                 <button id="flip-y-btn" title="Flip Vertical">↕️</button>
             </div>
-            
+
             <div class="control-row">
                 <label>Speed</label>
                 <input type="range" id="speed-slider" min="0" max="100" value="20">
                 <span id="speed-display">20</span>
             </div>
-            
+
             <div class="control-row">
                 <label>Size</label>
                 <input type="range" id="size-slider" min="20" max="150" value="60">
             </div>
 
-             <div class="control-row">
+            <div class="control-row">
                 <label>Width</label>
                 <input type="range" id="width-slider" min="50" max="100" value="90">
             </div>
@@ -77,4 +79,5 @@
         }
     </script>
 </body>
+
 </html>

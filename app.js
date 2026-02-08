@@ -8,7 +8,7 @@ const controlsOverlay = document.getElementById('controls-overlay');
 const tapZone = document.getElementById('tap-zone');
 
 // Version Info
-const APP_VERSION = "v1.2";
+const APP_VERSION = "v1.3";
 
 // Controls
 const speedSlider = document.getElementById('speed-slider');
