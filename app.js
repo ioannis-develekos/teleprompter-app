@@ -1,8 +1,8 @@
 // ============================================================
-// Teleprompter Pro v2.0 — Voice Activity + Speech Rate Engine
+// Teleprompter Pro v2.1 — Voice Activity Engine (Event Frequency)
 // ============================================================
 
-const APP_VERSION = "v2.0";
+const APP_VERSION = "v2.1";
 
 // --- DOM ---
 const editorContainer = document.getElementById('editor-container');
@@ -25,8 +25,8 @@ const micStatusBar = document.getElementById('mic-status-bar');
 const micStatusText = document.getElementById('mic-status-text');
 
 // --- State ---
-let isPlaying = false;   // Manual scroll active
-let baseSpeed = 25;      // Base px/sec from slider
+let isPlaying = false;
+let baseSpeed = 25;
 let currentScrollPos = 0;
 let targetScrollPos = 0;
 const LERP = 0.12;
@@ -34,21 +34,41 @@ const LERP = 0.12;
 let isPrompterActive = false;
 let flipX = false, flipY = false;
 let animFrameId;
+let lastFrameTime = 0;
 
 // Touch
 let isDragging = false;
 let touchStartY = 0;
 let lastTouchY = 0;
-const DRAG_THRESHOLD = 8; // px before we consider it a drag
+const DRAG_THRESHOLD = 8;
 
-// Speech / Voice Activity
+// ============================================================
+// SPEECH ENGINE — Event Frequency Based
+// ============================================================
+// How it works:
+// - When mic is on, every time Web Speech API fires `onresult`,
+//   we record a timestamp.
+// - We measure how many events fired in the last 2 seconds.
+// - More events = faster speech = higher scroll multiplier.
+// - No events for 1s = silence = pause.
+//
+// This is robust because:
+// - We don't care WHAT was said, only that speech is happening
+// - Works identically for any language
+// - interimResults firing frequently = speech is active
+// ============================================================
+
 let recognition = null;
 let isMicActive = false;
-let speechSpeed = 0;      // Dynamic multiplier from speech rate
-let lastSpeechTime = 0;
-let silenceTimeout = null;
-const SILENCE_DELAY = 1200;   // ms of silence before pausing
-let wordTimestamps = [];     // For calculating speech rate
+let speechMultiplier = 0;       // 0 = paused, ~1 = normal, >1 = fast
+let resultTimestamps = [];      // Timestamps of onresult events
+let silenceTimer = null;
+const SILENCE_MS = 1000;    // Pause after 1s silence
+const RATE_WINDOW = 2000;    // Measure rate over 2s window
+
+// Typical speech produces ~4-8 onresult events/sec with interimResults
+const EVENTS_FOR_NORMAL = 3;    // events/sec → multiplier 1.0
+const MAX_MULTIPLIER = 2.0;
 
 // ============================================================
 // INIT
@@ -57,13 +77,16 @@ function init() {
     const saved = localStorage.getItem('teleprompter_text');
     if (saved) textInput.value = saved;
 
-    // Restore slider values
+    // Auto-select language from browser, matching closest option
+    autoSelectLanguage();
+
+    // Restore settings
     const ss = localStorage.getItem('tp_speed');
     const sz = localStorage.getItem('tp_size');
     const wd = localStorage.getItem('tp_width');
     if (ss) { speedSlider.value = ss; baseSpeed = +ss; }
-    if (sz) { sizeSlider.value = sz; }
-    if (wd) { widthSlider.value = wd; }
+    if (sz) sizeSlider.value = sz;
+    if (wd) widthSlider.value = wd;
     updateDisplays();
 }
 
@@ -71,6 +94,19 @@ function updateDisplays() {
     document.getElementById('speed-display').innerText = speedSlider.value;
     document.getElementById('size-display').innerText = sizeSlider.value;
     document.getElementById('width-display').innerText = widthSlider.value + '%';
+}
+
+function autoSelectLanguage() {
+    const browserLang = navigator.language || navigator.userLanguage || 'en-US';
+    const options = Array.from(languageSelect.options);
+    // Try exact match (e.g. 'el-GR')
+    const exact = options.find(o => o.value === browserLang);
+    if (exact) { languageSelect.value = exact.value; return; }
+    // Try prefix match (e.g. 'el' matches 'el-GR')
+    const prefix = browserLang.split('-')[0];
+    const partial = options.find(o => o.value.startsWith(prefix));
+    if (partial) { languageSelect.value = partial.value; return; }
+    // Fallback: first option stays selected
 }
 
 // ============================================================
@@ -91,7 +127,6 @@ playPauseBtn.addEventListener('click', (e) => {
     togglePlay();
 });
 
-// Sliders
 speedSlider.addEventListener('input', () => {
     baseSpeed = +speedSlider.value;
     localStorage.setItem('tp_speed', speedSlider.value);
@@ -112,9 +147,7 @@ flipXBtn.addEventListener('click', (e) => { e.stopPropagation(); flipX = !flipX;
 flipYBtn.addEventListener('click', (e) => { e.stopPropagation(); flipY = !flipY; applyTransform(); });
 micToggle.addEventListener('click', (e) => { e.stopPropagation(); toggleMic(); });
 
-// --- Touch Handling ---
-// Goal: short tap = toggle controls, drag = manual scroll
-
+// --- Touch ---
 tapZone.addEventListener('touchstart', (e) => {
     isDragging = false;
     touchStartY = e.touches[0].clientY;
@@ -123,13 +156,10 @@ tapZone.addEventListener('touchstart', (e) => {
 
 tapZone.addEventListener('touchmove', (e) => {
     const y = e.touches[0].clientY;
-    const totalDelta = Math.abs(y - touchStartY);
-
-    if (totalDelta > DRAG_THRESHOLD) {
+    if (Math.abs(y - touchStartY) > DRAG_THRESHOLD) {
         isDragging = true;
         e.preventDefault();
-
-        const delta = lastTouchY - y; // positive = scroll down
+        const delta = lastTouchY - y;
         targetScrollPos += delta;
         if (targetScrollPos < 0) targetScrollPos = 0;
         currentScrollPos = targetScrollPos;
@@ -139,30 +169,21 @@ tapZone.addEventListener('touchmove', (e) => {
 }, { passive: false });
 
 tapZone.addEventListener('touchend', () => {
-    if (!isDragging) {
-        // It was a tap → toggle controls
-        toggleControls();
-    }
+    if (!isDragging) toggleControls();
     isDragging = false;
 });
 
-// Mouse click fallback (desktop)
-tapZone.addEventListener('click', (e) => {
-    // On desktop, click = toggle controls
-    // On mobile, touchend already handles it; click fires after but isDragging is reset
-    // So this is mainly for desktop
-    if (!('ontouchstart' in window)) {
-        toggleControls();
-    }
+// Desktop click
+tapZone.addEventListener('click', () => {
+    if (!('ontouchstart' in window)) toggleControls();
 });
 
 // ============================================================
-// PROMPTER CORE
+// PROMPTER
 // ============================================================
 
 function enterPrompter(text) {
     scrollContent.innerText = text;
-
     editorContainer.classList.remove('active');
     prompterContainer.classList.add('active');
     isPrompterActive = true;
@@ -174,7 +195,6 @@ function enterPrompter(text) {
     applyVisuals();
     applyTransform();
 
-    // Start render loop
     lastFrameTime = performance.now();
     requestAnimationFrame(loop);
 }
@@ -191,19 +211,12 @@ function exitPrompter() {
 function togglePlay() {
     isPlaying = !isPlaying;
     updatePlayBtn();
-    if (isPlaying) {
-        controlsOverlay.classList.add('hidden');
-    }
+    if (isPlaying) controlsOverlay.classList.add('hidden');
 }
 
 function updatePlayBtn() {
-    if (isPlaying) {
-        playPauseBtn.innerText = '⏸';
-        playPauseBtn.classList.add('playing');
-    } else {
-        playPauseBtn.innerText = '▶';
-        playPauseBtn.classList.remove('playing');
-    }
+    playPauseBtn.innerText = isPlaying ? '⏸' : '▶';
+    playPauseBtn.classList.toggle('playing', isPlaying);
 }
 
 function toggleControls() {
@@ -226,27 +239,24 @@ function applyTransform() {
 // ============================================================
 // RENDER LOOP
 // ============================================================
-let lastFrameTime = 0;
 
 function loop(ts) {
     if (!isPrompterActive) return;
 
-    const dt = (ts - lastFrameTime) / 1000;
+    const dt = Math.min((ts - lastFrameTime) / 1000, 0.1); // Cap to avoid jumps
     lastFrameTime = ts;
 
-    // --- Determine effective speed ---
-    let effectiveSpeed = 0;
+    let speed = 0;
 
     if (isMicActive) {
-        // Voice-controlled: speechSpeed is set by speech rate detection
-        effectiveSpeed = speechSpeed * baseSpeed;
+        // Voice-driven: speechMultiplier is set by event frequency
+        speed = speechMultiplier * baseSpeed;
     } else if (isPlaying && !isDragging) {
-        // Manual play mode
-        effectiveSpeed = baseSpeed * 1.5;
+        speed = baseSpeed * 1.5;
     }
 
-    if (effectiveSpeed > 0) {
-        targetScrollPos += effectiveSpeed * dt;
+    if (speed > 0) {
+        targetScrollPos += speed * dt;
     }
 
     // Lerp
@@ -262,7 +272,7 @@ function loop(ts) {
 }
 
 // ============================================================
-// SPEECH ENGINE — Voice Activity + Speech Rate
+// SPEECH — Event Frequency Engine
 // ============================================================
 
 function toggleMic() {
@@ -272,30 +282,30 @@ function toggleMic() {
 
 function startMic() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return alert('Speech API not supported. Use Chrome.');
+    if (!SR) return alert('Speech not supported. Use Chrome.');
 
     recognition = new SR();
-    recognition.lang = languageSelect.value;
+    recognition.lang = languageSelect.value; // Use selected language
     recognition.continuous = true;
-    recognition.interimResults = true;
+    recognition.interimResults = true;    // Key: gives us frequent events
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
         isMicActive = true;
-        speechSpeed = 0;
-        wordTimestamps = [];
+        speechMultiplier = 0;
+        resultTimestamps = [];
         micToggle.classList.add('active');
         micStatusBar.classList.remove('hidden');
-        micStatusText.innerText = 'Listening — speak to scroll';
+        micStatusText.innerText = 'Ready — speak to scroll';
 
-        // Pause manual play if active
+        // Disable manual play
         isPlaying = false;
         updatePlayBtn();
     };
 
     recognition.onend = () => {
         if (isMicActive) {
-            // Auto-restart (Android/Chrome kills it periodically)
+            // Auto-restart (Chrome/Android kills recognition periodically)
             try { recognition.start(); } catch (e) { }
         } else {
             micToggle.classList.remove('active');
@@ -305,55 +315,47 @@ function startMic() {
 
     recognition.onerror = (e) => {
         console.warn('Speech error:', e.error);
-        if (e.error === 'not-allowed') {
-            alert('Microphone access denied. Please allow it in browser settings.');
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+            alert('Microphone access denied.');
             stopMic();
         }
+        // 'no-speech' is normal — just means silence, don't stop
     };
 
-    recognition.onresult = (event) => {
+    recognition.onresult = () => {
+        // We don't care about the transcript at all!
+        // We only care that this event fired = user is speaking.
+
         const now = performance.now();
+        resultTimestamps.push(now);
 
-        // Count new words from the latest result
-        const result = event.results[event.resultIndex];
-        const transcript = result[0].transcript.trim();
-        const words = transcript.split(/\s+/);
+        // Trim to rate window
+        const cutoff = now - RATE_WINDOW;
+        resultTimestamps = resultTimestamps.filter(t => t > cutoff);
 
-        // Record timestamps for rate calculation
-        wordTimestamps.push({ time: now, count: words.length });
+        // Calculate events per second
+        const eventsInWindow = resultTimestamps.length;
+        const windowSec = RATE_WINDOW / 1000;
+        const eventsPerSec = eventsInWindow / windowSec;
 
-        // Keep only last 3 seconds of data
-        const windowStart = now - 3000;
-        wordTimestamps = wordTimestamps.filter(w => w.time > windowStart);
+        // Map to multiplier:
+        // EVENTS_FOR_NORMAL eps → 1.0x
+        // More → proportionally faster, capped at MAX_MULTIPLIER
+        speechMultiplier = Math.min(eventsPerSec / EVENTS_FOR_NORMAL, MAX_MULTIPLIER);
 
-        // Calculate words per second over the window
-        if (wordTimestamps.length >= 2) {
-            const oldest = wordTimestamps[0];
-            const elapsed = (now - oldest.time) / 1000;
-            const totalWords = wordTimestamps.reduce((s, w) => s + w.count, 0);
-            const wps = totalWords / Math.max(elapsed, 0.5);
+        // Ensure minimum movement when speaking
+        if (speechMultiplier < 0.3) speechMultiplier = 0.3;
 
-            // Map WPS to speed multiplier
-            // Typical speech: 2-3 words/sec → multiplier ~1.0
-            // Fast speech: 4+ words/sec → multiplier ~1.5-2.0
-            // Slow speech: 1 word/sec → multiplier ~0.5
-            speechSpeed = Math.min(wps / 2.5, 2.5); // Normalize: 2.5 wps = 1.0x
-        } else {
-            speechSpeed = 0.8; // Default while starting
-        }
-
-        // Update status
-        micStatusText.innerText = `Speaking — ${speechSpeed.toFixed(1)}× speed`;
-
-        // Mark last speech time
-        lastSpeechTime = now;
+        // Update UI
+        const pct = Math.round(speechMultiplier * 100);
+        micStatusText.innerText = `Speaking — ${pct}% speed`;
 
         // Reset silence timer
-        clearTimeout(silenceTimeout);
-        silenceTimeout = setTimeout(() => {
-            speechSpeed = 0;
+        clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => {
+            speechMultiplier = 0;
             micStatusText.innerText = 'Paused — waiting for speech';
-        }, SILENCE_DELAY);
+        }, SILENCE_MS);
     };
 
     recognition.start();
@@ -361,19 +363,14 @@ function startMic() {
 
 function stopMic() {
     isMicActive = false;
-    speechSpeed = 0;
-    clearTimeout(silenceTimeout);
+    speechMultiplier = 0;
+    clearTimeout(silenceTimer);
     if (recognition) {
         try { recognition.stop(); } catch (e) { }
     }
     micToggle.classList.remove('active');
     micStatusBar.classList.add('hidden');
 }
-
-// ============================================================
-// SETTINGS PERSISTENCE
-// ============================================================
-function loadSettings() { } // Handled in init()
 
 // ============================================================
 init();

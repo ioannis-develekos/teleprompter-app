@@ -226,6 +226,18 @@ input[type="range"]::-webkit-slider-thumb {
     cursor: pointer;
 }
 
+/* Language selector */
+.lang-row select {
+    flex: 1;
+    background: #1a1a1a;
+    color: #ccc;
+    border: 1px solid #333;
+    padding: 0.4rem 0.5rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-family: 'Inter', sans-serif;
+}
+
 /* Buttons */
 .icon-btn {
     background: #1a1a1a;

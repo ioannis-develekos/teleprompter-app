@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Teleprompter Pro v2.0</title>
+    <title>Teleprompter Pro v2.1</title>
     <link rel="stylesheet" href="style.css">
     <link rel="manifest" href="manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -17,34 +17,41 @@
     <!-- Editor Mode -->
     <div id="editor-container" class="active">
         <header>
-            <h1>Teleprompter Pro <span class="version-badge">v2.0</span></h1>
-            <div class="header-controls">
-                <select id="language-select">
-                    <option value="en-US">English</option>
-                    <option value="el-GR">Ελληνικά</option>
-                </select>
-                <button id="start-btn" class="primary-btn">▶ START</button>
-            </div>
+            <h1>Teleprompter Pro <span class="version-badge">v2.1</span></h1>
+            <button id="start-btn" class="primary-btn">▶ START</button>
         </header>
         <textarea id="text-input" placeholder="Type or paste your script here..."></textarea>
     </div>
 
     <!-- Prompter Mode -->
     <div id="prompter-container">
-        <!-- Reading Line Indicator -->
+        <!-- Reading Line -->
         <div id="reading-line"></div>
 
-        <!-- The scrolling content -->
+        <!-- Scrolling Text -->
         <div id="scroll-content"></div>
 
-        <!-- Controls Overlay -->
+        <!-- Controls -->
         <div id="controls-overlay">
             <div class="control-row top-row">
                 <button id="back-btn" class="icon-btn" title="Exit">✕</button>
                 <button id="play-pause-btn" class="icon-btn play-btn" title="Play/Pause">▶</button>
-                <button id="flip-x-btn" class="icon-btn" title="Flip Horizontal">↔</button>
-                <button id="flip-y-btn" class="icon-btn" title="Flip Vertical">↕</button>
+                <button id="flip-x-btn" class="icon-btn" title="Flip H">↔</button>
+                <button id="flip-y-btn" class="icon-btn" title="Flip V">↕</button>
                 <button id="mic-toggle" class="icon-btn mic-btn" title="Voice Follow">🎤</button>
+            </div>
+
+            <div class="control-row lang-row">
+                <label>Lang</label>
+                <select id="language-select">
+                    <option value="el-GR">Ελληνικά</option>
+                    <option value="en-US">English</option>
+                    <option value="en-GB">English UK</option>
+                    <option value="de-DE">Deutsch</option>
+                    <option value="fr-FR">Français</option>
+                    <option value="es-ES">Español</option>
+                    <option value="it-IT">Italiano</option>
+                </select>
             </div>
 
             <div class="control-row">
@@ -52,13 +59,11 @@
                 <input type="range" id="speed-slider" min="1" max="100" value="25">
                 <span id="speed-display">25</span>
             </div>
-
             <div class="control-row">
                 <label>Size</label>
                 <input type="range" id="size-slider" min="20" max="120" value="48">
                 <span id="size-display">48</span>
             </div>
-
             <div class="control-row">
                 <label>Width</label>
                 <input type="range" id="width-slider" min="50" max="100" value="90">
